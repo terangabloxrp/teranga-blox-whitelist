@@ -1,8 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
-// 🤖 TERANGA BLOX RP - BOT DISCORD WHITELIST SIMPLE
+// 🤖 TERANGA BLOX RP - BOT DISCORD AVEC CODES AUTOMATIQUES
+// ═══════════════════════════════════════════════════════════════
+// Système de vérification par codes uniques
 // ═══════════════════════════════════════════════════════════════
 
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -21,28 +23,33 @@ const CONFIG = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// 📂 STOCKAGE SIMPLE
+// 📂 STOCKAGE
 // ═══════════════════════════════════════════════════════════════
 
-const DATA_FILE = path.join(__dirname, 'whitelist.json');
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+	fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
-function loadWhitelist() {
-	if (!fs.existsSync(DATA_FILE)) {
+function loadData(filename) {
+	const filepath = path.join(DATA_DIR, filename);
+	if (!fs.existsSync(filepath)) {
 		return {};
 	}
 	try {
-		return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+		return JSON.parse(fs.readFileSync(filepath, 'utf8'));
 	} catch (error) {
-		console.error('❌ Erreur lecture whitelist:', error);
+		console.error(`❌ Erreur lecture ${filename}:`, error);
 		return {};
 	}
 }
 
-function saveWhitelist(data) {
+function saveData(filename, data) {
+	const filepath = path.join(DATA_DIR, filename);
 	try {
-		fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+		fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
 	} catch (error) {
-		console.error('❌ Erreur sauvegarde whitelist:', error);
+		console.error(`❌ Erreur sauvegarde ${filename}:`, error);
 	}
 }
 
@@ -53,19 +60,16 @@ function saveWhitelist(data) {
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildMembers,
-		GatewayIntentBits.GuildMessages,
-		GatewayIntentBits.MessageContent
+		GatewayIntentBits.GuildMembers
 	]
 });
 
 let guild = null;
 let whitelistRole = null;
 let logsChannel = null;
-let awaitingIdFrom = new Map(); // Stock qui attend de donner un ID
 
 // ═══════════════════════════════════════════════════════════════
-// 📊 FONCTION: Envoyer logs
+// 📊 LOGS DISCORD
 // ═══════════════════════════════════════════════════════════════
 
 function sendLog(title, description, color, fields = []) {
@@ -84,7 +88,9 @@ function sendLog(title, description, color, fields = []) {
 		}
 	}
 
-	logsChannel.send({ embeds: [embed] }).catch(console.error);
+	logsChannel.send({ embeds: [embed] }).catch(err => {
+		console.error('❌ Erreur log:', err.message);
+	});
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -114,45 +120,157 @@ client.once('ready', async () => {
 		console.log(`✅ Logs : #${logsChannel.name}`);
 	}
 
-	// Auto-whitelist membres existants
-	await autoWhitelistExisting();
+	// Enregistrer commandes
+	const commands = [
+		{
+			name: 'verify',
+			description: 'Vérifier un code de validation Roblox',
+			options: [
+				{
+					name: 'code',
+					description: 'Le code à 6 caractères (ex: AB3K9F)',
+					type: 3, // STRING
+					required: true
+				}
+			]
+		}
+	];
+
+	const rest = new REST({ version: '10' }).setToken(CONFIG.BOT_TOKEN);
+
+	try {
+		await rest.put(
+			Routes.applicationGuildCommands(client.user.id, CONFIG.GUILD_ID),
+			{ body: commands }
+		);
+		console.log('✅ Commande /verify enregistrée');
+	} catch (error) {
+		console.error('❌ Erreur commandes:', error);
+	}
+
+	const verified = loadData('verified.json');
+	console.log(`📊 ${Object.keys(verified).length} joueur(s) vérifié(s)`);
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 🔄 AUTO-WHITELIST: Membres existants avec rôle
+// 🎫 COMMANDE: /verify
 // ═══════════════════════════════════════════════════════════════
 
-async function autoWhitelistExisting() {
-	if (!guild || !whitelistRole) return;
+client.on('interactionCreate', async interaction => {
+	if (!interaction.isCommand()) return;
 
-	const whitelist = loadWhitelist();
-	let count = 0;
+	if (interaction.commandName === 'verify') {
+		const code = interaction.options.getString('code').toUpperCase().trim();
+		const member = interaction.member;
 
-	try {
-		await guild.members.fetch();
+		// Vérifier rôle
+		if (!member.roles.cache.has(whitelistRole.id)) {
+			const embed = new EmbedBuilder()
+				.setTitle('❌ Accès refusé')
+				.setDescription(`Vous devez avoir le rôle @${CONFIG.ROLE_NAME} pour vérifier un code.`)
+				.setColor(0xFF0000);
 
-		for (const [memberId, member] of guild.members.cache) {
-			if (member.roles.cache.has(whitelistRole.id)) {
-				// Si déjà dans whitelist, juste mettre à jour hasRole
-				if (whitelist[memberId]) {
-					whitelist[memberId].hasRole = true;
-				}
-				// Sinon, on NE FAIT RIEN (staff devra lier manuellement)
-				count++;
-			}
+			return interaction.reply({
+				embeds: [embed],
+				ephemeral: true
+			});
 		}
 
-		saveWhitelist(whitelist);
-		console.log(`📊 ${count} membre(s) avec rôle @${CONFIG.ROLE_NAME}`);
-		console.log(`📊 ${Object.keys(whitelist).length} membre(s) liés`);
+		// Vérifier format code (6 caractères alphanumériques)
+		if (!/^[A-Z0-9]{6}$/.test(code)) {
+			const embed = new EmbedBuilder()
+				.setTitle('❌ Code invalide')
+				.setDescription('Le code doit contenir 6 caractères (lettres et chiffres).')
+				.setColor(0xFF0000);
 
-	} catch (error) {
-		console.error('❌ Erreur auto-whitelist:', error);
+			return interaction.reply({
+				embeds: [embed],
+				ephemeral: true
+			});
+		}
+
+		// Chercher le code
+		const pendingCodes = loadData('pending_codes.json');
+		const codeData = pendingCodes[code];
+
+		if (!codeData) {
+			const embed = new EmbedBuilder()
+				.setTitle('❌ Code introuvable')
+				.setDescription(`Le code \`${code}\` n'existe pas ou a déjà été utilisé.`)
+				.setColor(0xFF0000);
+
+			return interaction.reply({
+				embeds: [embed],
+				ephemeral: true
+			});
+		}
+
+		// Vérifier si déjà vérifié
+		const verified = loadData('verified.json');
+		if (verified[codeData.robloxId]) {
+			const embed = new EmbedBuilder()
+				.setTitle('⚠️ Déjà vérifié')
+				.setDescription(`Ce joueur est déjà vérifié.`)
+				.setColor(0xFFAA00)
+				.addFields([
+					{ name: '🎮 Roblox', value: `${codeData.robloxName} (${codeData.robloxId})`, inline: true },
+					{ name: '👤 Discord', value: verified[codeData.robloxId].discordTag, inline: true }
+				]);
+
+			return interaction.reply({
+				embeds: [embed],
+				ephemeral: true
+			});
+		}
+
+		// Valider le code
+		verified[codeData.robloxId] = {
+			discordId: member.id,
+			discordTag: member.user.tag,
+			hasRole: true,
+			verifiedAt: new Date().toISOString(),
+			code: code
+		};
+
+		saveData('verified.json', verified);
+
+		// Supprimer le code
+		delete pendingCodes[code];
+		saveData('pending_codes.json', pendingCodes);
+
+		// Réponse succès
+		const embed = new EmbedBuilder()
+			.setTitle('✅ Joueur vérifié !')
+			.setDescription('Le compte a été lié avec succès.')
+			.setColor(0x00FF00)
+			.addFields([
+				{ name: '🎮 Roblox', value: `${codeData.robloxName} (${codeData.robloxId})`, inline: true },
+				{ name: '👤 Discord', value: member.user.tag, inline: true },
+				{ name: '🎫 Code', value: code, inline: true }
+			]);
+
+		await interaction.reply({
+			embeds: [embed]
+		});
+
+		// Log
+		sendLog(
+			'✅ Vérification réussie',
+			'Un joueur a été vérifié',
+			0x00FF00,
+			[
+				{ name: '🎮 Roblox', value: `${codeData.robloxName} (${codeData.robloxId})`, inline: true },
+				{ name: '👤 Discord', value: member.user.tag, inline: true },
+				{ name: '🎫 Code', value: code, inline: true }
+			]
+		);
+
+		console.log(`✅ ${member.user.tag} a vérifié ${codeData.robloxName} (${code})`);
 	}
-}
+});
 
 // ═══════════════════════════════════════════════════════════════
-// 👤 ÉVÉNEMENT: Rôle ajouté ou retiré
+// 👤 ÉVÉNEMENT: Rôle retiré
 // ═══════════════════════════════════════════════════════════════
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
@@ -161,177 +279,55 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 	const hadRole = oldMember.roles.cache.has(whitelistRole.id);
 	const hasRoleNow = newMember.roles.cache.has(whitelistRole.id);
 
-	// Rien n'a changé
-	if (hadRole === hasRoleNow) return;
-
-	const whitelist = loadWhitelist();
-	const userId = newMember.id;
-
-	// ═══════════════════════════════════════════════════════════
-	// ✅ RÔLE AJOUTÉ
-	// ═══════════════════════════════════════════════════════════
-
-	if (hasRoleNow && !hadRole) {
-		console.log(`✅ Rôle ajouté à ${newMember.user.tag}`);
-
-		// Vérifier si déjà lié
-		if (whitelist[userId] && whitelist[userId].robloxId) {
-			// Déjà lié ! Juste réactiver
-			whitelist[userId].hasRole = true;
-			saveWhitelist(whitelist);
-
-			sendLog(
-				'✅ Rôle redonné',
-				`${newMember.user.tag} a retrouvé le rôle`,
-				0x00FF00,
-				[
-					{ name: 'Discord', value: newMember.user.tag, inline: true },
-					{ name: 'Roblox ID', value: whitelist[userId].robloxId, inline: true },
-					{ name: 'Statut', value: '✅ Déjà lié', inline: true }
-				]
-			);
-
-			console.log(`✅ ${newMember.user.tag} déjà lié à ${whitelist[userId].robloxId}`);
-			return;
-		}
-
-		// Pas encore lié ! Demander l'ID
-		if (logsChannel) {
-			const embed = new EmbedBuilder()
-				.setTitle('🆕 Nouveau membre à lier')
-				.setDescription(`${newMember.user.tag} a reçu le rôle @${CONFIG.ROLE_NAME}`)
-				.setColor(0xFFAA00)
-				.addFields([
-					{ name: '👤 Membre', value: newMember.user.tag, inline: true },
-					{ name: '🆔 Discord ID', value: userId, inline: true },
-					{ name: '📝 Action requise', value: 'Tapez l\'ID Roblox de ce joueur dans ce salon', inline: false }
-				])
-				.setFooter({ text: 'Format: Juste le numéro ID (ex: 123456789)' });
-
-			logsChannel.send({ embeds: [embed] });
-
-			// Marquer qu'on attend un ID pour ce membre
-			awaitingIdFrom.set(userId, {
-				tag: newMember.user.tag,
-				timestamp: Date.now()
-			});
-
-			console.log(`⏳ En attente de l'ID Roblox pour ${newMember.user.tag}`);
-		}
-	}
-
-	// ═══════════════════════════════════════════════════════════
-	// ❌ RÔLE RETIRÉ
-	// ═══════════════════════════════════════════════════════════
-
+	// Rôle retiré
 	if (hadRole && !hasRoleNow) {
-		console.log(`❌ Rôle retiré à ${newMember.user.tag}`);
+		const verified = loadData('verified.json');
 
-		if (whitelist[userId]) {
-			whitelist[userId].hasRole = false;
-			saveWhitelist(whitelist);
-
-			sendLog(
-				'❌ Rôle retiré',
-				`${newMember.user.tag} n'a plus le rôle`,
-				0xFF0000,
-				[
-					{ name: 'Discord', value: newMember.user.tag, inline: true },
-					{ name: 'Roblox ID', value: whitelist[userId].robloxId || 'Non lié', inline: true },
-					{ name: 'Statut', value: '❌ Désactivé', inline: true }
-				]
-			);
+		// Trouver tous les comptes liés à ce Discord ID
+		for (const [robloxId, data] of Object.entries(verified)) {
+			if (data.discordId === newMember.id) {
+				data.hasRole = false;
+				console.log(`❌ Rôle retiré pour ${data.discordTag} (Roblox: ${robloxId})`);
+			}
 		}
+
+		saveData('verified.json', verified);
+
+		sendLog(
+			'❌ Rôle retiré',
+			`${newMember.user.tag} n'a plus le rôle`,
+			0xFF0000,
+			[
+				{ name: 'Discord', value: newMember.user.tag, inline: true },
+				{ name: 'Statut', value: '❌ Accès révoqué', inline: true }
+			]
+		);
 	}
-});
 
-// ═══════════════════════════════════════════════════════════════
-// 💬 ÉVÉNEMENT: Message (pour recevoir l'ID Roblox)
-// ═══════════════════════════════════════════════════════════════
+	// Rôle redonné
+	if (!hadRole && hasRoleNow) {
+		const verified = loadData('verified.json');
 
-client.on('messageCreate', async (message) => {
-	// Ignorer bots
-	if (message.author.bot) return;
-
-	// Seulement dans le salon logs
-	if (!logsChannel || message.channel.id !== logsChannel.id) return;
-
-	// Seulement si on attend des IDs
-	if (awaitingIdFrom.size === 0) return;
-
-	const content = message.content.trim();
-
-	// Vérifier si c'est un ID Roblox (que des chiffres, 6-12 caractères)
-	if (!/^\d{6,12}$/.test(content)) return;
-
-	const robloxId = content;
-
-	// Trouver le membre le plus récent en attente
-	let targetUserId = null;
-	let oldestTime = Date.now();
-
-	for (const [userId, data] of awaitingIdFrom.entries()) {
-		if (data.timestamp < oldestTime) {
-			oldestTime = data.timestamp;
-			targetUserId = userId;
+		// Trouver tous les comptes liés à ce Discord ID
+		for (const [robloxId, data] of Object.entries(verified)) {
+			if (data.discordId === newMember.id) {
+				data.hasRole = true;
+				console.log(`✅ Rôle redonné pour ${data.discordTag} (Roblox: ${robloxId})`);
+			}
 		}
+
+		saveData('verified.json', verified);
+
+		sendLog(
+			'✅ Rôle redonné',
+			`${newMember.user.tag} a retrouvé le rôle`,
+			0x00FF00,
+			[
+				{ name: 'Discord', value: newMember.user.tag, inline: true },
+				{ name: 'Statut', value: '✅ Accès rétabli', inline: true }
+			]
+		);
 	}
-
-	if (!targetUserId) return;
-
-	const targetData = awaitingIdFrom.get(targetUserId);
-	awaitingIdFrom.delete(targetUserId);
-
-	// Vérifier si cet ID est déjà utilisé
-	const whitelist = loadWhitelist();
-	const existingUser = Object.entries(whitelist).find(
-		([discordId, data]) => data.robloxId === robloxId
-	);
-
-	if (existingUser) {
-		const embed = new EmbedBuilder()
-			.setTitle('⚠️ ID déjà utilisé')
-			.setDescription(`L'ID Roblox ${robloxId} est déjà lié`)
-			.setColor(0xFF6600)
-			.addFields([
-				{ name: 'Roblox ID', value: robloxId, inline: true },
-				{ name: 'Déjà lié à', value: whitelist[existingUser[0]].tag, inline: true }
-			]);
-
-		logsChannel.send({ embeds: [embed] });
-		awaitingIdFrom.set(targetUserId, targetData); // Remettre en attente
-		return;
-	}
-
-	// Créer la liaison
-	whitelist[targetUserId] = {
-		tag: targetData.tag,
-		robloxId: robloxId,
-		hasRole: true,
-		linkedAt: new Date().toISOString(),
-		linkedBy: message.author.tag
-	};
-
-	saveWhitelist(whitelist);
-
-	// Confirmation
-	const embed = new EmbedBuilder()
-		.setTitle('✅ Joueur lié avec succès')
-		.setDescription(`${targetData.tag} a été lié à l'ID Roblox`)
-		.setColor(0x00FF00)
-		.addFields([
-			{ name: '👤 Discord', value: targetData.tag, inline: true },
-			{ name: '🎮 Roblox ID', value: robloxId, inline: true },
-			{ name: '👮 Par', value: message.author.tag, inline: true }
-		])
-		.setTimestamp();
-
-	logsChannel.send({ embeds: [embed] });
-
-	// Réaction de confirmation sur le message
-	message.react('✅').catch(() => {});
-
-	console.log(`✅ ${targetData.tag} lié à ${robloxId} par ${message.author.tag}`);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -342,7 +338,7 @@ const app = express();
 app.use(express.json());
 
 // ═══════════════════════════════════════════════════════════════
-// 🔑 MIDDLEWARE: Vérifier API Key
+// 🔑 MIDDLEWARE: API Key
 // ═══════════════════════════════════════════════════════════════
 
 function verifyApiKey(req, res, next) {
@@ -354,7 +350,7 @@ function verifyApiKey(req, res, next) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 🏥 ENDPOINT: Health check
+// 🏥 ENDPOINT: Health
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/health', (req, res) => {
@@ -366,52 +362,97 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ✅ ENDPOINT: Vérifier whitelist
+// 🎫 ENDPOINT: Créer code
+// ═══════════════════════════════════════════════════════════════
+
+app.post('/createcode', verifyApiKey, (req, res) => {
+	const { robloxId, robloxName } = req.body;
+
+	if (!robloxId || !robloxName) {
+		return res.status(400).json({ error: 'Missing parameters' });
+	}
+
+	// Vérifier si déjà un code actif
+	const pendingCodes = loadData('pending_codes.json');
+	const existingCode = Object.entries(pendingCodes).find(
+		([code, data]) => data.robloxId === robloxId
+	);
+
+	if (existingCode) {
+		return res.json({
+			success: true,
+			code: existingCode[0],
+			existing: true
+		});
+	}
+
+	// Générer nouveau code
+	const code = generateCode();
+	pendingCodes[code] = {
+		robloxId: robloxId,
+		robloxName: robloxName,
+		createdAt: new Date().toISOString()
+	};
+
+	saveData('pending_codes.json', pendingCodes);
+
+	console.log(`🎫 Code créé: ${code} pour ${robloxName} (${robloxId})`);
+
+	res.json({
+		success: true,
+		code: code,
+		existing: false
+	});
+});
+
+function generateCode() {
+	const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+	let code = '';
+	for (let i = 0; i < 6; i++) {
+		code += chars.charAt(Math.floor(Math.random() * chars.length));
+	}
+	return code;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ✅ ENDPOINT: Vérifier statut
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/check/:robloxId', verifyApiKey, async (req, res) => {
 	const { robloxId } = req.params;
-	const whitelist = loadWhitelist();
 
-	// Chercher le Discord ID qui correspond à ce Roblox ID
-	const entry = Object.entries(whitelist).find(
-		([discordId, data]) => data.robloxId === robloxId
-	);
+	const verified = loadData('verified.json');
+	const data = verified[robloxId];
 
-	if (!entry) {
-		// Pas lié
+	if (!data) {
 		return res.json({
-			whitelisted: false,
-			linked: false,
+			verified: false,
 			hasRole: false
 		});
 	}
 
-	const [discordId, data] = entry;
-
-	// Vérifier le rôle en temps réel
+	// Vérifier rôle en temps réel
 	let hasRoleNow = false;
 	if (guild && whitelistRole) {
 		try {
-			const member = await guild.members.fetch(discordId);
+			const member = await guild.members.fetch(data.discordId);
 			hasRoleNow = member.roles.cache.has(whitelistRole.id);
 
 			// Mettre à jour si changement
 			if (hasRoleNow !== data.hasRole) {
 				data.hasRole = hasRoleNow;
-				whitelist[discordId] = data;
-				saveWhitelist(whitelist);
+				verified[robloxId] = data;
+				saveData('verified.json', verified);
 			}
 		} catch (error) {
-			console.error('Erreur fetch member:', error);
+			console.error('Erreur fetch member:', error.message);
 		}
 	}
 
 	res.json({
-		whitelisted: hasRoleNow,
-		linked: true,
+		verified: true,
 		hasRole: hasRoleNow,
-		discordTag: data.tag
+		discordTag: data.discordTag
 	});
 });
 
@@ -430,7 +471,7 @@ client.login(CONFIG.BOT_TOKEN);
 // ═══════════════════════════════════════════════════════════════
 
 process.on('unhandledRejection', error => {
-	console.error('❌ Erreur:', error);
+	console.error('❌ Erreur:', error.message);
 });
 
 process.on('SIGTERM', () => {
@@ -438,3 +479,44 @@ process.on('SIGTERM', () => {
 	client.destroy();
 	process.exit(0);
 });
+```
+
+---
+
+# 📋 COMMENT REMPLACER SUR GITHUB
+
+1. **Va sur GitHub** → Ton repository `teranga-blox-whitelist-v2`
+
+2. **Clique sur `discord-bot-codes.js`**
+
+3. **Clique sur l'icône crayon** (Edit)
+
+4. **Ctrl+A** (tout sélectionner)
+
+5. **Delete**
+
+6. **Copie TOUT le code ci-dessus**
+
+7. **Colle dans GitHub**
+
+8. **Scroll en bas** → **Commit changes**
+
+9. **Va sur Render** → Ton service
+
+10. **Manual Deploy** → **Deploy latest commit**
+
+11. **Attends 2-3 minutes**
+
+12. **Vérifie les logs Render**
+
+---
+
+## ✅ TU DOIS VOIR DANS LES LOGS RENDER
+```
+✅ API démarrée sur port 10000
+✅ Bot connecté : Teranga Blox Whitelist#1234
+✅ Rôle trouvé : @CITOYEN
+✅ Logs : #whitelist-logs
+✅ Commande /verify enregistrée
+📊 0 joueur(s) vérifié(s)
+==> Your service is live 🎉
