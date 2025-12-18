@@ -172,7 +172,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				ephemeral: true
+				flags: ['Ephemeral']
 			});
 		}
 
@@ -185,7 +185,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				ephemeral: true
+				flags: ['Ephemeral']
 			});
 		}
 
@@ -201,7 +201,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				ephemeral: true
+				flags: ['Ephemeral']
 			});
 		}
 
@@ -219,7 +219,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				ephemeral: true
+				flags: ['Ephemeral']
 			});
 		}
 
@@ -479,44 +479,3 @@ process.on('SIGTERM', () => {
 	client.destroy();
 	process.exit(0);
 });
-```
-
----
-
-# 📋 COMMENT REMPLACER SUR GITHUB
-
-1. **Va sur GitHub** → Ton repository `teranga-blox-whitelist-v2`
-
-2. **Clique sur `discord-bot-codes.js`**
-
-3. **Clique sur l'icône crayon** (Edit)
-
-4. **Ctrl+A** (tout sélectionner)
-
-5. **Delete**
-
-6. **Copie TOUT le code ci-dessus**
-
-7. **Colle dans GitHub**
-
-8. **Scroll en bas** → **Commit changes**
-
-9. **Va sur Render** → Ton service
-
-10. **Manual Deploy** → **Deploy latest commit**
-
-11. **Attends 2-3 minutes**
-
-12. **Vérifie les logs Render**
-
----
-
-## ✅ TU DOIS VOIR DANS LES LOGS RENDER
-```
-✅ API démarrée sur port 10000
-✅ Bot connecté : Teranga Blox Whitelist#1234
-✅ Rôle trouvé : @CITOYEN
-✅ Logs : #whitelist-logs
-✅ Commande /verify enregistrée
-📊 0 joueur(s) vérifié(s)
-==> Your service is live 🎉
