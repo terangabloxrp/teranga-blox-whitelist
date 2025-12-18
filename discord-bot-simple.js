@@ -1,7 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// 🤖 TERANGA BLOX RP - BOT DISCORD AVEC CODES AUTOMATIQUES
-// ═══════════════════════════════════════════════════════════════
-// Système de vérification par codes uniques
+// 🤖 TERANGA BLOX RP - BOT DISCORD FINAL AVEC LOGS DÉTAILLÉS
 // ═══════════════════════════════════════════════════════════════
 
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes } = require('discord.js');
@@ -54,6 +52,44 @@ function saveData(filename, data) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 📊 STATISTIQUES
+// ═══════════════════════════════════════════════════════════════
+
+function getStats() {
+	const verified = loadData('verified.json');
+	const pending = loadData('pending_codes.json');
+	
+	let withRole = 0;
+	let withoutRole = 0;
+	
+	for (const data of Object.values(verified)) {
+		if (data.hasRole) {
+			withRole++;
+		} else {
+			withoutRole++;
+		}
+	}
+	
+	return {
+		totalVerified: Object.keys(verified).length,
+		withRole: withRole,
+		withoutRole: withoutRole,
+		pendingCodes: Object.keys(pending).length
+	};
+}
+
+function logStats() {
+	const stats = getStats();
+	console.log('═══════════════════════════════════════');
+	console.log('📊 STATISTIQUES');
+	console.log(`   Total vérifié: ${stats.totalVerified}`);
+	console.log(`   Avec rôle: ${stats.withRole}`);
+	console.log(`   Sans rôle: ${stats.withoutRole}`);
+	console.log(`   Codes en attente: ${stats.pendingCodes}`);
+	console.log('═══════════════════════════════════════');
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 🤖 CLIENT DISCORD
 // ═══════════════════════════════════════════════════════════════
 
@@ -98,19 +134,22 @@ function sendLog(title, description, color, fields = []) {
 // ═══════════════════════════════════════════════════════════════
 
 client.once('ready', async () => {
+	console.log('═══════════════════════════════════════');
 	console.log(`✅ Bot connecté : ${client.user.tag}`);
+	console.log('═══════════════════════════════════════');
 
 	guild = client.guilds.cache.get(CONFIG.GUILD_ID);
 	if (!guild) {
 		console.error('❌ Guild introuvable !');
 		return;
 	}
+	console.log(`✅ Serveur : ${guild.name}`);
 
 	whitelistRole = guild.roles.cache.find(role => role.name === CONFIG.ROLE_NAME);
 	if (!whitelistRole) {
 		console.error(`❌ Rôle "${CONFIG.ROLE_NAME}" introuvable !`);
 	} else {
-		console.log(`✅ Rôle trouvé : @${whitelistRole.name}`);
+		console.log(`✅ Rôle trouvé : @${whitelistRole.name} (${whitelistRole.id})`);
 	}
 
 	logsChannel = guild.channels.cache.find(ch => ch.name === CONFIG.LOG_CHANNEL);
@@ -129,7 +168,7 @@ client.once('ready', async () => {
 				{
 					name: 'code',
 					description: 'Le code à 6 caractères (ex: AB3K9F)',
-					type: 3, // STRING
+					type: 3,
 					required: true
 				}
 			]
@@ -148,8 +187,13 @@ client.once('ready', async () => {
 		console.error('❌ Erreur commandes:', error);
 	}
 
-	const verified = loadData('verified.json');
-	console.log(`📊 ${Object.keys(verified).length} joueur(s) vérifié(s)`);
+	// Afficher stats
+	logStats();
+	
+	// Stats toutes les 5 minutes
+	setInterval(() => {
+		logStats();
+	}, 300000);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -163,8 +207,13 @@ client.on('interactionCreate', async interaction => {
 		const code = interaction.options.getString('code').toUpperCase().trim();
 		const member = interaction.member;
 
+		console.log('═══════════════════════════════════════');
+		console.log(`📨 [VERIFY] ${member.user.tag} essaie code: ${code}`);
+
 		// Vérifier rôle
 		if (!member.roles.cache.has(whitelistRole.id)) {
+			console.log(`❌ [VERIFY] ${member.user.tag} n'a pas le rôle ${CONFIG.ROLE_NAME}`);
+			
 			const embed = new EmbedBuilder()
 				.setTitle('❌ Accès refusé')
 				.setDescription(`Vous devez avoir le rôle @${CONFIG.ROLE_NAME} pour vérifier un code.`)
@@ -172,12 +221,14 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				flags: ['Ephemeral']
+				ephemeral: true
 			});
 		}
 
-		// Vérifier format code (6 caractères alphanumériques)
+		// Vérifier format
 		if (!/^[A-Z0-9]{6}$/.test(code)) {
+			console.log(`❌ [VERIFY] Format invalide: ${code}`);
+			
 			const embed = new EmbedBuilder()
 				.setTitle('❌ Code invalide')
 				.setDescription('Le code doit contenir 6 caractères (lettres et chiffres).')
@@ -185,7 +236,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				flags: ['Ephemeral']
+				ephemeral: true
 			});
 		}
 
@@ -194,6 +245,8 @@ client.on('interactionCreate', async interaction => {
 		const codeData = pendingCodes[code];
 
 		if (!codeData) {
+			console.log(`❌ [VERIFY] Code ${code} introuvable`);
+			
 			const embed = new EmbedBuilder()
 				.setTitle('❌ Code introuvable')
 				.setDescription(`Le code \`${code}\` n'existe pas ou a déjà été utilisé.`)
@@ -201,13 +254,17 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				flags: ['Ephemeral']
+				ephemeral: true
 			});
 		}
+
+		console.log(`✅ [VERIFY] Code trouvé pour ${codeData.robloxName}`);
 
 		// Vérifier si déjà vérifié
 		const verified = loadData('verified.json');
 		if (verified[codeData.robloxId]) {
+			console.log(`⚠️ [VERIFY] ${codeData.robloxName} déjà vérifié`);
+			
 			const embed = new EmbedBuilder()
 				.setTitle('⚠️ Déjà vérifié')
 				.setDescription(`Ce joueur est déjà vérifié.`)
@@ -219,7 +276,7 @@ client.on('interactionCreate', async interaction => {
 
 			return interaction.reply({
 				embeds: [embed],
-				flags: ['Ephemeral']
+				ephemeral: true
 			});
 		}
 
@@ -238,6 +295,9 @@ client.on('interactionCreate', async interaction => {
 		delete pendingCodes[code];
 		saveData('pending_codes.json', pendingCodes);
 
+		console.log(`✅ [VERIFY] ${codeData.robloxName} vérifié par ${member.user.tag}`);
+		logStats();
+
 		// Réponse succès
 		const embed = new EmbedBuilder()
 			.setTitle('✅ Joueur vérifié !')
@@ -249,9 +309,7 @@ client.on('interactionCreate', async interaction => {
 				{ name: '🎫 Code', value: code, inline: true }
 			]);
 
-		await interaction.reply({
-			embeds: [embed]
-		});
+		await interaction.reply({ embeds: [embed] });
 
 		// Log
 		sendLog(
@@ -264,13 +322,13 @@ client.on('interactionCreate', async interaction => {
 				{ name: '🎫 Code', value: code, inline: true }
 			]
 		);
-
-		console.log(`✅ ${member.user.tag} a vérifié ${codeData.robloxName} (${code})`);
+		
+		console.log('═══════════════════════════════════════');
 	}
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 👤 ÉVÉNEMENT: Rôle retiré
+// 👤 ÉVÉNEMENT: Rôle modifié
 // ═══════════════════════════════════════════════════════════════
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
@@ -281,52 +339,74 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
 	// Rôle retiré
 	if (hadRole && !hasRoleNow) {
+		console.log('═══════════════════════════════════════');
+		console.log(`❌ [ROLE] Rôle retiré de ${newMember.user.tag}`);
+		
 		const verified = loadData('verified.json');
+		let updated = 0;
 
-		// Trouver tous les comptes liés à ce Discord ID
+		// Trouver comptes liés
 		for (const [robloxId, data] of Object.entries(verified)) {
 			if (data.discordId === newMember.id) {
 				data.hasRole = false;
-				console.log(`❌ Rôle retiré pour ${data.discordTag} (Roblox: ${robloxId})`);
+				updated++;
+				console.log(`   → Roblox ID ${robloxId} marqué sans rôle`);
 			}
 		}
 
-		saveData('verified.json', verified);
+		if (updated > 0) {
+			saveData('verified.json', verified);
+			logStats();
+		}
 
 		sendLog(
 			'❌ Rôle retiré',
-			`${newMember.user.tag} n'a plus le rôle`,
+			`${newMember.user.tag} n'a plus le rôle @${CONFIG.ROLE_NAME}`,
 			0xFF0000,
 			[
 				{ name: 'Discord', value: newMember.user.tag, inline: true },
+				{ name: 'Comptes affectés', value: updated.toString(), inline: true },
 				{ name: 'Statut', value: '❌ Accès révoqué', inline: true }
 			]
 		);
+		
+		console.log('═══════════════════════════════════════');
 	}
 
 	// Rôle redonné
 	if (!hadRole && hasRoleNow) {
+		console.log('═══════════════════════════════════════');
+		console.log(`✅ [ROLE] Rôle redonné à ${newMember.user.tag}`);
+		
 		const verified = loadData('verified.json');
+		let updated = 0;
 
-		// Trouver tous les comptes liés à ce Discord ID
+		// Trouver comptes liés
 		for (const [robloxId, data] of Object.entries(verified)) {
 			if (data.discordId === newMember.id) {
 				data.hasRole = true;
-				console.log(`✅ Rôle redonné pour ${data.discordTag} (Roblox: ${robloxId})`);
+				updated++;
+				console.log(`   → Roblox ID ${robloxId} marqué avec rôle`);
 			}
 		}
 
-		saveData('verified.json', verified);
+		if (updated > 0) {
+			saveData('verified.json', verified);
+			logStats();
+		}
 
 		sendLog(
 			'✅ Rôle redonné',
-			`${newMember.user.tag} a retrouvé le rôle`,
+			`${newMember.user.tag} a retrouvé le rôle @${CONFIG.ROLE_NAME}`,
 			0x00FF00,
 			[
 				{ name: 'Discord', value: newMember.user.tag, inline: true },
+				{ name: 'Comptes affectés', value: updated.toString(), inline: true },
 				{ name: 'Statut', value: '✅ Accès rétabli', inline: true }
 			]
 		);
+		
+		console.log('═══════════════════════════════════════');
 	}
 });
 
@@ -337,34 +417,28 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 const app = express();
 app.use(express.json());
 
-// ═══════════════════════════════════════════════════════════════
-// 🔑 MIDDLEWARE: API Key
-// ═══════════════════════════════════════════════════════════════
-
+// Middleware API Key
 function verifyApiKey(req, res, next) {
 	const apiKey = req.headers['x-api-key'];
 	if (!apiKey || apiKey !== CONFIG.API_KEY) {
+		console.log(`❌ [API] Requête non autorisée de ${req.ip}`);
 		return res.status(401).json({ error: 'Unauthorized' });
 	}
 	next();
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 🏥 ENDPOINT: Health
-// ═══════════════════════════════════════════════════════════════
-
+// Health
 app.get('/health', (req, res) => {
+	const stats = getStats();
 	res.json({
 		status: 'online',
 		bot: client.user?.tag || 'connecting',
-		uptime: process.uptime()
+		uptime: process.uptime(),
+		stats: stats
 	});
 });
 
-// ═══════════════════════════════════════════════════════════════
-// 🎫 ENDPOINT: Créer code
-// ═══════════════════════════════════════════════════════════════
-
+// Créer code
 app.post('/createcode', verifyApiKey, (req, res) => {
 	const { robloxId, robloxName } = req.body;
 
@@ -372,13 +446,13 @@ app.post('/createcode', verifyApiKey, (req, res) => {
 		return res.status(400).json({ error: 'Missing parameters' });
 	}
 
-	// Vérifier si déjà un code actif
 	const pendingCodes = loadData('pending_codes.json');
 	const existingCode = Object.entries(pendingCodes).find(
 		([code, data]) => data.robloxId === robloxId
 	);
 
 	if (existingCode) {
+		console.log(`🔄 [API] Code existant réutilisé: ${existingCode[0]} pour ${robloxName}`);
 		return res.json({
 			success: true,
 			code: existingCode[0],
@@ -396,7 +470,8 @@ app.post('/createcode', verifyApiKey, (req, res) => {
 
 	saveData('pending_codes.json', pendingCodes);
 
-	console.log(`🎫 Code créé: ${code} pour ${robloxName} (${robloxId})`);
+	console.log(`🎫 [API] Code créé: ${code} pour ${robloxName} (${robloxId})`);
+	logStats();
 
 	res.json({
 		success: true,
@@ -414,10 +489,7 @@ function generateCode() {
 	return code;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ✅ ENDPOINT: Vérifier statut
-// ═══════════════════════════════════════════════════════════════
-
+// Vérifier statut
 app.get('/check/:robloxId', verifyApiKey, async (req, res) => {
 	const { robloxId } = req.params;
 
@@ -425,6 +497,7 @@ app.get('/check/:robloxId', verifyApiKey, async (req, res) => {
 	const data = verified[robloxId];
 
 	if (!data) {
+		console.log(`🔍 [API] Check ${robloxId}: Non vérifié`);
 		return res.json({
 			verified: false,
 			hasRole: false
@@ -440,14 +513,17 @@ app.get('/check/:robloxId', verifyApiKey, async (req, res) => {
 
 			// Mettre à jour si changement
 			if (hasRoleNow !== data.hasRole) {
+				console.log(`🔄 [API] Mise à jour rôle pour ${robloxId}: ${data.hasRole} → ${hasRoleNow}`);
 				data.hasRole = hasRoleNow;
 				verified[robloxId] = data;
 				saveData('verified.json', verified);
 			}
 		} catch (error) {
-			console.error('Erreur fetch member:', error.message);
+			console.error(`❌ [API] Erreur fetch member ${data.discordId}:`, error.message);
 		}
 	}
+
+	console.log(`🔍 [API] Check ${robloxId}: Vérifié=${true}, Rôle=${hasRoleNow}`);
 
 	res.json({
 		verified: true,
@@ -476,6 +552,7 @@ process.on('unhandledRejection', error => {
 
 process.on('SIGTERM', () => {
 	console.log('🛑 Arrêt du bot...');
+	logStats();
 	client.destroy();
 	process.exit(0);
 });
