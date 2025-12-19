@@ -1,8 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
-// 🤖 TERANGA BLOX RP - BOT DISCORD FINAL AVEC LOGS DÉTAILLÉS
+// 🤖 TERANGA BLOX RP - BOT AVEC COMPTEUR JOUEURS EN LIGNE
+// ═══════════════════════════════════════════════════════════════
+// 🆕 COMPTEUR EN TEMPS RÉEL :
+// • Statut bot : "🟢 5 joueurs en ligne"
+// • Endpoint /players pour Roblox
+// • Mise à jour automatique toutes les 30s
+// • Logs détaillés
 // ═══════════════════════════════════════════════════════════════
 
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, ActivityType } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -16,8 +22,10 @@ const CONFIG = {
 	GUILD_ID: process.env.GUILD_ID,
 	ROLE_NAME: process.env.ROLE_NAME || 'CITOYEN',
 	LOG_CHANNEL: process.env.LOG_CHANNEL || 'whitelist-logs',
+	STATS_CHANNEL: process.env.STATS_CHANNEL || 'serveur-stats', // 🆕 Salon stats optionnel
 	API_KEY: process.env.API_KEY,
 	PORT: process.env.PORT || 10000,
+	UPDATE_INTERVAL: 30000, // 🆕 30 secondes
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -50,6 +58,34 @@ function saveData(filename, data) {
 		console.error(`❌ Erreur sauvegarde ${filename}:`, error);
 	}
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 🎮 DONNÉES SERVEUR ROBLOX
+// ═══════════════════════════════════════════════════════════════
+
+let serverData = {
+	onlinePlayers: 0,
+	maxPlayers: 50,
+	servers: [],
+	lastUpdate: null
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 🤖 CLIENT DISCORD
+// ═══════════════════════════════════════════════════════════════
+
+const client = new Client({
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMembers
+	]
+});
+
+let guild = null;
+let whitelistRole = null;
+let logsChannel = null;
+let statsChannel = null; // 🆕
+let statsMessage = null; // 🆕 Message stats
 
 // ═══════════════════════════════════════════════════════════════
 // 📊 STATISTIQUES
@@ -86,23 +122,102 @@ function logStats() {
 	console.log(`   Avec rôle: ${stats.withRole}`);
 	console.log(`   Sans rôle: ${stats.withoutRole}`);
 	console.log(`   Codes en attente: ${stats.pendingCodes}`);
+	console.log(`   🎮 Joueurs en ligne: ${serverData.onlinePlayers}/${serverData.maxPlayers}`);
 	console.log('═══════════════════════════════════════');
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 🤖 CLIENT DISCORD
+// 🔄 MISE À JOUR STATUT BOT
 // ═══════════════════════════════════════════════════════════════
 
-const client = new Client({
-	intents: [
-		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildMembers
-	]
-});
+function updateBotStatus() {
+	if (!client.user) return;
+	
+	const playerCount = serverData.onlinePlayers;
+	const status = playerCount > 0 
+		? `🟢 ${playerCount} joueur${playerCount > 1 ? 's' : ''} en ligne`
+		: `⚪ Serveur vide`;
+	
+	client.user.setActivity(status, { type: ActivityType.Watching });
+	console.log(`🔄 [STATUS] Statut mis à jour : ${status}`);
+}
 
-let guild = null;
-let whitelistRole = null;
-let logsChannel = null;
+// ═══════════════════════════════════════════════════════════════
+// 📊 MISE À JOUR SALON STATS
+// ═══════════════════════════════════════════════════════════════
+
+async function updateStatsChannel() {
+	if (!statsChannel) return;
+	
+	const stats = getStats();
+	const now = new Date();
+	const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+	
+	const embed = new EmbedBuilder()
+		.setTitle('📊 Statistiques Serveur Teranga Blox RP')
+		.setColor(serverData.onlinePlayers > 0 ? 0x00FF00 : 0x808080)
+		.addFields([
+			{ 
+				name: '🎮 Joueurs en ligne', 
+				value: `**${serverData.onlinePlayers}** / ${serverData.maxPlayers}`, 
+				inline: true 
+			},
+			{ 
+				name: '🖥️ Serveurs actifs', 
+				value: `**${serverData.servers.length}**`, 
+				inline: true 
+			},
+			{ 
+				name: '\u200B', 
+				value: '\u200B', 
+				inline: true 
+			},
+			{ 
+				name: '✅ Joueurs vérifiés', 
+				value: `**${stats.totalVerified}**`, 
+				inline: true 
+			},
+			{ 
+				name: '👥 Avec rôle', 
+				value: `**${stats.withRole}**`, 
+				inline: true 
+			},
+			{ 
+				name: '⏳ Codes en attente', 
+				value: `**${stats.pendingCodes}**`, 
+				inline: true 
+			}
+		])
+		.setFooter({ text: `Dernière mise à jour : ${timeStr}` })
+		.setTimestamp();
+	
+	try {
+		if (statsMessage) {
+			// Modifier message existant
+			await statsMessage.edit({ embeds: [embed] });
+		} else {
+			// Chercher message existant
+			const messages = await statsChannel.messages.fetch({ limit: 10 });
+			const existingMsg = messages.find(msg => 
+				msg.author.id === client.user.id && 
+				msg.embeds.length > 0 &&
+				msg.embeds[0].title?.includes('Statistiques Serveur')
+			);
+			
+			if (existingMsg) {
+				statsMessage = existingMsg;
+				await statsMessage.edit({ embeds: [embed] });
+			} else {
+				// Créer nouveau message
+				statsMessage = await statsChannel.send({ embeds: [embed] });
+			}
+		}
+		
+		console.log(`📊 [STATS] Salon mis à jour : ${serverData.onlinePlayers} joueurs`);
+	} catch (error) {
+		console.error('❌ Erreur mise à jour stats:', error.message);
+	}
+}
 
 // ═══════════════════════════════════════════════════════════════
 // 📊 LOGS DISCORD
@@ -158,6 +273,15 @@ client.once('ready', async () => {
 	} else {
 		console.log(`✅ Logs : #${logsChannel.name}`);
 	}
+	
+	// 🆕 Salon stats
+	statsChannel = guild.channels.cache.find(ch => ch.name === CONFIG.STATS_CHANNEL);
+	if (statsChannel) {
+		console.log(`✅ Stats : #${statsChannel.name}`);
+		await updateStatsChannel();
+	} else {
+		console.log(`ℹ️ Salon stats "${CONFIG.STATS_CHANNEL}" introuvable (optionnel)`);
+	}
 
 	// Enregistrer commandes
 	const commands = [
@@ -187,13 +311,24 @@ client.once('ready', async () => {
 		console.error('❌ Erreur commandes:', error);
 	}
 
-	// Afficher stats
+	// Stats initiales
 	logStats();
+	
+	// 🆕 Mise à jour automatique
+	setInterval(() => {
+		updateBotStatus();
+		if (statsChannel) {
+			updateStatsChannel();
+		}
+	}, CONFIG.UPDATE_INTERVAL);
 	
 	// Stats toutes les 5 minutes
 	setInterval(() => {
 		logStats();
 	}, 300000);
+	
+	// Statut initial
+	updateBotStatus();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -345,7 +480,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 		const verified = loadData('verified.json');
 		let updated = 0;
 
-		// Trouver comptes liés
 		for (const [robloxId, data] of Object.entries(verified)) {
 			if (data.discordId === newMember.id) {
 				data.hasRole = false;
@@ -381,7 +515,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 		const verified = loadData('verified.json');
 		let updated = 0;
 
-		// Trouver comptes liés
 		for (const [robloxId, data] of Object.entries(verified)) {
 			if (data.discordId === newMember.id) {
 				data.hasRole = true;
@@ -434,8 +567,33 @@ app.get('/health', (req, res) => {
 		status: 'online',
 		bot: client.user?.tag || 'connecting',
 		uptime: process.uptime(),
+		players: serverData,
 		stats: stats
 	});
+});
+
+// 🆕 Update players (Roblox → Discord)
+app.post('/players', verifyApiKey, (req, res) => {
+	const { online, max, servers } = req.body;
+	
+	if (typeof online !== 'number' || typeof max !== 'number') {
+		return res.status(400).json({ error: 'Invalid data' });
+	}
+	
+	serverData.onlinePlayers = online;
+	serverData.maxPlayers = max;
+	serverData.servers = servers || [];
+	serverData.lastUpdate = new Date().toISOString();
+	
+	console.log(`🎮 [PLAYERS] Mis à jour : ${online}/${max} joueurs`);
+	
+	// Mise à jour immédiate
+	updateBotStatus();
+	if (statsChannel) {
+		updateStatsChannel();
+	}
+	
+	res.json({ success: true });
 });
 
 // Créer code
